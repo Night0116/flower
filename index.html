@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flower Wand - Hand Tracking</title>
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        video {
+            transform: scaleX(-1);
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+        .instruction {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 16px;
+            color: #fff;
+            backdrop-filter: blur(5px);
+            z-index: 10;
+            pointer-events: none;
+        }
+        #error-msg {
+            position: absolute;
+            top: 20px;
+            background: rgba(255, 0, 0, 0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            display: none;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="error-msg">Camera success error! Yahuu kadi peeje camera nde aɓe njaɓa walla huutoraade HTTPS/localhost.</div>
+
+    <div id="container">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="output_canvas"></canvas>
+        <div class="instruction">Point to plant • Open your hand to scatter</div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const errorMsg = document.getElementById('error-msg');
+
+        let flowers = [];
+        const flowerTypes = ['🌸', '🌺', '🌻', '🌹', '🌼', '🌷', '✨'];
+
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        class Flower {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.emoji = flowerTypes[Math.floor(Math.random() * flowerTypes.length)];
+                this.size = Math.random() * 20 + 20;
+                this.vx = 0;
+                this.vy = 0;
+                this.isScattered = false;
+            }
+
+            scatter() {
+                if (!this.isScattered) {
+                    this.isScattered = true;
+                    this.vx = (Math.random() - 0.5) * 15;
+                    this.vy = (Math.random() - 0.5) * 15;
+                }
+            }
+
+            update() {
+                if (this.isScattered) {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.size *= 0.96;
+                }
+            }
+
+            draw(ctx) {
+                if (this.size < 2) return;
+                ctx.save();
+                ctx.font = `${this.size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.emoji, this.x, this.y);
+                ctx.restore();
+            }
+        }
+
+        function onResults(results) {
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    // Index tip (Point 8)
+                    const indexTip = landmarks[8];
+                    const x = indexTip.x * canvasElement.width;
+                    const y = indexTip.y * canvasElement.height;
+
+                    // Gesture Check: Open Hand
+                    const isHandOpen = detectOpenHand(landmarks);
+
+                    if (isHandOpen) {
+                        flowers.forEach(f => f.scatter());
+                    } else {
+                        // Plant flowers on Index Tip
+                        flowers.push(new Flower(x, y));
+                    }
+
+                    // Draw hand lines
+                    drawHandSkeleton(landmarks);
+                }
+            }
+
+            // Update & Draw Flowers
+            for (let i = flowers.length - 1; i >= 0; i--) {
+                flowers[i].update();
+                flowers[i].draw(canvasCtx);
+                if (flowers[i].size < 2) {
+                    flowers.splice(i, 1);
+                }
+            }
+        }
+
+        function detectOpenHand(landmarks) {
+            const tips = [8, 12, 16, 20];
+            const mcp = [5, 9, 13, 17];
+            let openFingers = 0;
+
+            for (let i = 0; i < 4; i++) {
+                if (landmarks[tips[i]].y < landmarks[mcp[i]].y) {
+                    openFingers++;
+                }
+            }
+            return openFingers >= 3;
+        }
+
+        function drawHandSkeleton(landmarks) {
+            canvasCtx.strokeStyle = 'white';
+            canvasCtx.lineWidth = 2;
+            const connections = [
+                [0,1],[1,2],[2,3],[3,4],
+                [0,5],[5,6],[6,7],[7,8],
+                [5,9],[9,10],[10,11],[11,12],
+                [9,13],[13,14],[14,15],[15,16],
+                [13,17],[17,18],[18,19],[19,20],[0,17]
+            ];
+            for (let [i, j] of connections) {
+                const pt1 = landmarks[i];
+                const pt2 = landmarks[j];
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(pt1.x * canvasElement.width, pt1.y * canvasElement.height);
+                canvasCtx.lineTo(pt2.x * canvasElement.width, pt2.y * canvasElement.height);
+                canvasCtx.stroke();
+            }
+        }
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+
+        camera.start().catch(err => {
+            console.error("Camera access error:", err);
+            errorMsg.style.display = 'block';
+        });
+    </script>
+</body>
+</html>
